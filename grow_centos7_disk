@@ -1,18 +1,18 @@
 #!/bin/bash
 
-# CEntos 7 - ten plik powinien znajdować się w /etc/rc.d/init.d/extend
+# CEntos 7 - ten plik powinien znajdować się w /root/extend
 
 DEVICE="$(df -hkPBG / | tail -1 | awk '{print $1}')"
 if [ "$DEVICE" != "/dev/mapper/centos-root" ] && [ "$DEVICE" != "/dev/mapper/VolGroup-lv_root" ]; then
-	echo "This is not the standard partitioning scheme."
+        echo "This is not the standard partitioning scheme."
     echo "Please contact support for further information on extending your disk space."
-	echo "Exiting..."
+        echo "Exiting..."
     exit 1
 fi
 
 extendfs() {
 
-cat <<EOF >> /etc/rc.d/init.d/extendfs
+cat <<EOF >> /tmp/extendfs
 #!/bin/bash
 
 ## Resize filesystem on /dev/sda2
@@ -22,16 +22,23 @@ echo "lvresize -l +100%FREE /dev/mapper/centos/root" >> /var/log/vm_resize.log
 lvresize -l +100%FREE /dev/mapper/centos/root &>> /var/log/vm_resize.log
 echo "xfs_growfs /dev/mapper/centos-root" >> /var/log/vm_resize.log
 xfs_growfs /dev/mapper/centos-root &>> /var/log/vm_resize.log
-rm /etc/rc.d/init.d/extendfs
-
+rm /tmp/extendfs
+sed -i "/\/tmp\/extendfs/d" /etc/rc.d/rc.local
+chmod -x /etc/rc.d/rc.local
 EOF
-chmod +x /etc/rc.d/init.d/extendfs
+chmod +x /tmp/extendfs
 }
 
+name=`/sbin/ifconfig eth0 | grep 'inet ' | cut -d" "  -f10 | awk '{print $1}' | cut -d. -f4`
+
+hostnamectl set-hostname VPS$name
+
 echo "Starting disk resize..."
-echo "User initiated VM disk resize" >> /var/log/vm_resize.log	
+echo "User initiated VM disk resize" >> /var/log/vm_resize.log
 extendfs
 echo -e "d\n2\nn\np\n2\n\n+\nt\n2\n8e\nw" | fdisk /dev/xvda &>> /var/log/vm_resize.log
-rm -f /etc/rc.d/init.d/extend
+rm -f /root/extend
+sed -i "/\/root\/extend/d" /etc/rc.d/rc.local
+echo "/tmp/extendfs" >>/etc/rc.d/rc.local
 echo "Rebooting to finish install"
 shutdown -r now
