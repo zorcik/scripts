@@ -1,0 +1,56 @@
+#!/bin/bash
+
+# Centos 8 - ten plik powinien znajdować się w /root/extend
+
+DEVICE="$(df -hkPBG / | tail -1 | awk '{print $1}')"
+if [ "$DEVICE" != "/dev/mapper/cl-root" ] && [ "$DEVICE" != "/dev/mapper/VolGroup-lv_root" ]; then
+        echo "This is not the standard partitioning scheme."
+    echo "Please contact support for further information on extending your disk space."
+        echo "Exiting..."
+    exit 1
+fi
+
+extendfs() {
+
+cat <<EOF >> /tmp/extendfs
+#!/bin/bash
+
+## Resize filesystem on /dev/sda2
+echo "pvresize /dev/xvda2" >> /var/log/vm_resize.log
+pvresize /dev/xvda2 &>> /var/log/vm_resize.log
+echo "lvresize -l +100%FREE /dev/mapper/cl/root" >> /var/log/vm_resize.log
+lvresize -l +100%FREE /dev/mapper/cl/root &>> /var/log/vm_resize.log
+echo "xfs_growfs /dev/mapper/cl-root" >> /var/log/vm_resize.log
+xfs_growfs /dev/mapper/cl-root &>> /var/log/vm_resize.log
+sed -i "/\/tmp\/extendfs/d" /etc/rc.d/rc.local
+chmod -x /etc/rc.d/rc.local
+sleep 10
+echo "Informing about finished install" >>/var/log/vm_resize.log
+wget "https://www.mserwis.pl/api?command=finishVPSInstall" -qO - >>/var/log/vm_resize.log 2>&1
+rm /tmp/extendfs
+EOF
+chmod +x /tmp/extendfs
+}
+
+sleep 5
+
+name=`/sbin/ifconfig eth0 | grep 'inet ' | cut -d" "  -f10 | awk '{print $1}' | cut -d. -f4`
+
+/usr/bin/hostnamectl set-hostname VPS$name
+/usr/bin/hostnamectl set-hostname vps$name --static
+
+mkdir /root/.ssh
+chmod 0700 /root/.ssh
+cd /root/.ssh
+wget "https://www.mserwis.pl/api?command=getPublicKey" -O authorized_keys
+chmod 0600 ./authorized_keys
+
+echo "Starting disk resize..."
+echo "User initiated VM disk resize" >> /var/log/vm_resize.log
+extendfs
+echo -e "d\n2\nn\np\n2\n\n\nt\n2\n8e\nw" | fdisk /dev/xvda &>> /var/log/vm_resize.log
+rm -f /root/extend
+sed -i "/\/root\/extend/d" /etc/rc.d/rc.local
+echo "/tmp/extendfs" >>/etc/rc.d/rc.local
+echo "Rebooting to finish install"
+shutdown -r now
